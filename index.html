@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>行蹤記錄</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-serif;background:#0d0d14;color:#f0ece4;}
+
+/* ── Views ── */
+.view{position:fixed;inset:0;display:none;flex-direction:column;}
+.view.active{display:flex;}
+
+/* ── MAP ── */
+#map{flex:1;z-index:0;}
+
+.status-bar{
+  position:absolute;top:12px;left:12px;right:12px;z-index:500;
+  background:rgba(10,10,20,.88);backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,.1);border-radius:16px;
+  padding:11px 16px;display:flex;align-items:center;gap:14px;
+}
+.status-dot{width:10px;height:10px;border-radius:50%;background:#444;flex-shrink:0;}
+.status-dot.rec{background:#ef4444;animation:blink 1.1s infinite;}
+.status-dot.paused{background:#f59e0b;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.status-name{font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.status-stats{display:flex;gap:14px;flex-shrink:0;}
+.sstat{text-align:center;}
+.sstat strong{display:block;font-size:14px;color:#e8b86d;line-height:1.1;}
+.sstat span{font-size:10px;color:rgba(255,255,255,.45);}
+
+.gps-badge{
+  position:absolute;bottom:140px;right:12px;z-index:500;
+  background:rgba(10,10,20,.82);border-radius:8px;
+  padding:5px 10px;font-size:11px;
+  display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.7);
+}
+.gpsd{width:8px;height:8px;border-radius:50%;background:#444;}
+.gpsd.good{background:#22c55e;}
+.gpsd.ok{background:#f59e0b;}
+
+.bottom-bar{
+  position:absolute;bottom:0;left:0;right:0;z-index:500;
+  background:rgba(10,10,20,.94);backdrop-filter:blur(14px);
+  border-top:1px solid rgba(255,255,255,.08);
+  padding:14px 16px 30px;
+}
+.ctrl-row{display:flex;gap:10px;align-items:center;justify-content:center;}
+.btn{
+  border:none;border-radius:14px;cursor:pointer;
+  font-size:14px;font-weight:600;font-family:inherit;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  transition:all .13s;-webkit-tap-highlight-color:transparent;
+  padding:14px 18px;
+}
+.btn:active{transform:scale(.95);}
+.btn-start{background:#22c55e;color:#fff;flex:1;font-size:16px;max-width:220px;}
+.btn-stop{background:#ef4444;color:#fff;min-width:54px;}
+.btn-pause{background:#f59e0b;color:#fff;min-width:54px;}
+.btn-resume{background:#3b82f6;color:#fff;min-width:54px;}
+.btn-wp{background:rgba(255,255,255,.1);color:#fff;flex:1;border:1px solid rgba(255,255,255,.18);}
+.btn-ghost{background:rgba(255,255,255,.07);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.1);font-size:13px;padding:11px 16px;}
+
+/* ── History ── */
+#view-history{background:#0d0d14;}
+.page-header{
+  display:flex;align-items:center;gap:12px;
+  padding:18px 16px 14px;border-bottom:1px solid rgba(255,255,255,.07);
+  flex-shrink:0;
+}
+.page-header h2{flex:1;font-size:17px;font-weight:700;}
+.scroll-area{flex:1;overflow-y:auto;padding:12px 16px 24px;}
+.session-card{
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;padding:14px;margin-bottom:10px;cursor:pointer;
+  transition:background .15s;
+}
+.session-card:active{background:rgba(255,255,255,.1);}
+.sc-name{font-weight:700;font-size:15px;margin-bottom:6px;}
+.sc-meta{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:rgba(255,255,255,.45);}
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:rgba(255,255,255,.25);font-size:13px;}
+.empty-icon{font-size:52px;}
+
+/* ── Detail ── */
+#view-detail{background:#0d0d14;}
+#detail-map{height:260px;flex-shrink:0;}
+.wp-item{
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;padding:12px;margin-bottom:10px;
+}
+.wp-item img{width:100%;max-height:220px;object-fit:cover;border-radius:8px;margin-bottom:8px;display:block;}
+.wp-note{font-size:14px;line-height:1.55;}
+.wp-time{font-size:11px;color:rgba(255,255,255,.35);margin-top:6px;}
+
+/* ── Modal ── */
+.modal-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.65);
+  z-index:900;display:none;align-items:flex-end;
+}
+.modal-bg.open{display:flex;}
+.modal{
+  width:100%;background:#1c1c28;border-radius:22px 22px 0 0;
+  border:1px solid rgba(255,255,255,.1);border-bottom:none;
+  padding:22px 20px 36px;max-height:88vh;overflow-y:auto;
+}
+.modal h3{font-size:16px;font-weight:700;margin-bottom:16px;}
+.field-label{font-size:11px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;font-weight:600;}
+.field-textarea{
+  width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
+  border-radius:10px;padding:11px 13px;color:#f0ece4;font-size:15px;
+  font-family:inherit;resize:none;outline:none;margin-bottom:16px;
+  transition:border-color .15s;
+}
+.field-textarea:focus{border-color:#e8b86d;}
+.photo-btn{
+  width:100%;background:rgba(255,255,255,.06);
+  border:1.5px dashed rgba(255,255,255,.22);border-radius:10px;
+  color:rgba(255,255,255,.6);padding:15px;cursor:pointer;
+  font-size:14px;font-family:inherit;margin-bottom:14px;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:background .15s;
+}
+.photo-btn:active{background:rgba(255,255,255,.1);}
+#photo-preview{
+  width:100%;max-height:200px;object-fit:cover;border-radius:10px;
+  margin-bottom:14px;display:none;
+}
+.modal-actions{display:flex;gap:10px;}
+.btn-modal-cancel{flex:1;padding:14px;border-radius:12px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.7);border:none;cursor:pointer;font-family:inherit;font-size:14px;}
+.btn-modal-save{flex:1;padding:14px;border-radius:12px;background:#e8b86d;color:#1a0e00;border:none;cursor:pointer;font-family:inherit;font-size:15px;font-weight:700;}
+.btn-modal-save:active{transform:scale(.97);}
+
+/* Danger btn */
+.btn-danger{color:#ef4444;border-color:#ef4444;}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ MAP VIEW ═══════════════════ -->
+<div id="view-map" class="view active">
+  <div id="map"></div>
+
+  <div id="gps-error-banner" style="
+    display:none;position:absolute;top:80px;left:12px;right:12px;z-index:500;
+    background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.5);
+    border-radius:14px;padding:14px 16px;font-size:13px;line-height:1.6;
+    color:#fca5a5;backdrop-filter:blur(8px);
+  "></div>
+
+  <div class="status-bar">
+    <div id="status-dot" class="status-dot"></div>
+    <div id="status-name" class="status-name">準備記錄</div>
+    <div class="status-stats">
+      <div class="sstat"><strong id="st-time">00:00</strong><span>時間</span></div>
+      <div class="sstat"><strong id="st-dist">0m</strong><span>距離</span></div>
+      <div class="sstat"><strong id="st-pts">0</strong><span>GPS點</span></div>
+    </div>
+  </div>
+
+  <div class="gps-badge">
+    <div id="gps-dot" class="gpsd"></div>
+    <span id="gps-txt">等待 GPS</span>
+  </div>
+
+  <div class="bottom-bar">
+    <!-- IDLE -->
+    <div id="ctrl-idle" class="ctrl-row">
+      <button class="btn btn-start" onclick="startTracking()">▶ 開始記錄</button>
+      <button class="btn btn-ghost" onclick="showHistory()">📂 歷史</button>
+    </div>
+    <!-- RECORDING -->
+    <div id="ctrl-rec" class="ctrl-row" style="display:none">
+      <button id="btn-pause" class="btn btn-pause" onclick="togglePause()">⏸</button>
+      <button class="btn btn-stop" onclick="stopTracking()">⏹</button>
+      <button class="btn btn-wp" onclick="openModal()">📍 加入記錄點</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ HISTORY VIEW ═══════════════════ -->
+<div id="view-history" class="view">
+  <div class="page-header">
+    <button class="btn btn-ghost" onclick="showMap()">← 返回</button>
+    <h2>📂 歷史路線</h2>
+  </div>
+  <div id="session-list" class="scroll-area">
+    <div class="empty-state"><div class="empty-icon">🗺️</div><div>尚未有路線記錄</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ DETAIL VIEW ═══════════════════ -->
+<div id="view-detail" class="view">
+  <div class="page-header">
+    <button class="btn btn-ghost" onclick="showHistory()">← 返回</button>
+    <h2 id="detail-title">路線詳情</h2>
+    <button class="btn btn-ghost btn-danger" onclick="deleteSession()">🗑</button>
+  </div>
+  <div id="detail-map"></div>
+  <div id="wp-list" class="scroll-area"></div>
+</div>
+
+<!-- ═══════════════════ WAYPOINT MODAL ═══════════════════ -->
+<div id="modal-bg" class="modal-bg">
+  <div class="modal">
+    <h3>📍 加入記錄點</h3>
+    <div class="field-label">相片（可選）</div>
+    <button class="photo-btn" onclick="document.getElementById('photo-input').click()">
+      📷 拍照 / 選擇相片
+    </button>
+    <input type="file" id="photo-input" accept="image/*" capture="environment" onchange="handlePhoto(this)" style="display:none">
+    <img id="photo-preview">
+    <div class="field-label">備註</div>
+    <textarea id="wp-note" class="field-textarea" rows="3" placeholder="輸入備註、觀察、感想…"></textarea>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="closeModal()">取消</button>
+      <button class="btn-modal-save" onclick="saveWaypoint()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════
+   STATE
+════════════════════════════════════════════════ */
+let map, routeLine, posMarker, accCircle;
+let detailMap;
+let watchId = null;
+let state = 'idle';          // idle | recording | paused
+let session = null;
+let elapsed = 0;
+let timerH = null;
+let pendingPhoto = null;
+let viewingId = null;
+let sessions = [];
+
+const SESSIONS_META = 'wt-sessions-v1';
+const SESSION_PFX   = 'wt-sess-';
+
+/* ════════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════════ */
+window.addEventListener('load', async () => {
+  initMap();
+  await loadMeta();
+  getInitialPosition();
+});
+
+function initMap() {
+  map = L.map('map', { zoomControl: true, attributionControl: false })
+          .setView([22.3193, 114.1694], 16);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains:'abcd' }).addTo(map);
+  routeLine = L.polyline([], { color: '#3b82f6', weight: 5, opacity: .9 }).addTo(map);
+}
+
+function getInitialPosition() {
+  if (!navigator.geolocation) { setGPS('none', '不支援 GPS'); showGpsError(0); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    map.setView([pos.coords.latitude, pos.coords.longitude], 17);
+    updatePos(pos);
+  }, err => {
+    showGpsError(err.code);
+  }, { enableHighAccuracy: true, timeout: 12000 });
+}
+
+function showGpsError(code) {
+  const msgs = {
+    0: '此瀏覽器不支援定位',
+    1: '定位權限被拒絕\n請在瀏覽器設定中允許定位，然後重新整理頁面',
+    2: '無法取得位置\n請確保已開啟裝置 GPS，並在室外或開揚地方使用',
+    3: 'GPS 逾時\n訊號太弱，請移至開揚位置再試',
+  };
+  const msg = msgs[code] || '定位發生未知錯誤';
+  setGPS('none', code === 1 ? '權限被拒' : code === 3 ? 'GPS 逾時' : '無法定位');
+
+  // Show banner
+  const banner = document.getElementById('gps-error-banner');
+  banner.innerHTML = `⚠️ ${msg.replace('\n','<br>')}<br><br><small style="opacity:.7">💡 需要在手機 Chrome / Safari 直接開啟此 HTML 檔案</small>`;
+  banner.style.display = 'block';
+}
+
+/* ════════════════════════════════════════════════
+   POSITION
+════════════════════════════════════════════════ */
+function updatePos(pos) {
+  const { latitude: lat, longitude: lng, accuracy: acc } = pos.coords;
+
+  // GPS badge
+  if (acc < 20)      setGPS('good', `±${Math.round(acc)}m`);
+  else if (acc < 60) setGPS('ok',   `±${Math.round(acc)}m`);
+  else               setGPS('none', `弱 ±${Math.round(acc)}m`);
+
+  // Blue dot
+  const ll = [lat, lng];
+  if (posMarker) { posMarker.setLatLng(ll); accCircle.setLatLng(ll).setRadius(acc); }
+  else {
+    posMarker = L.circleMarker(ll, { radius: 9, fillColor: '#3b82f6', color: '#fff', weight: 2.5, fillOpacity: 1 }).addTo(map);
+    accCircle = L.circle(ll, { radius: acc, color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: .08, weight: 1 }).addTo(map);
+  }
+
+  // Record
+  if (state === 'recording' && session) {
+    session.points.push({ lat, lng, ts: Date.now() });
+    routeLine.addLatLng(ll);
+    map.panTo(ll);
+    refreshStats();
+  }
+}
+
+function setGPS(level, text) {
+  const d = document.getElementById('gps-dot');
+  d.className = 'gpsd' + (level === 'good' ? ' good' : level === 'ok' ? ' ok' : '');
+  document.getElementById('gps-txt').textContent = text;
+}
+
+/* ════════════════════════════════════════════════
+   TRACKING
+════════════════════════════════════════════════ */
+function startTracking() {
+  if (!navigator.geolocation) { alert('此裝置不支援定位功能'); return; }
+  const d = new Date();
+  const name = `路線 ${d.toLocaleDateString('zh-HK',{month:'short',day:'numeric'})} ${d.toLocaleTimeString('zh-HK',{hour:'2-digit',minute:'2-digit'})}`;
+  session = { id: uid(), name, date: d.toISOString(), points: [], waypoints: [] };
+  routeLine.setLatLngs([]);
+  elapsed = 0;
+  state = 'recording';
+  updateUI();
+  startWatch();
+  timerH = setInterval(() => { elapsed++; document.getElementById('st-time').textContent = fmtTime(elapsed); }, 1000);
+}
+
+function togglePause() {
+  if (state === 'recording') {
+    state = 'paused';
+    stopWatch(); clearInterval(timerH);
+    const b = document.getElementById('btn-pause');
+    b.textContent = '▶ 繼續'; b.className = 'btn btn-resume';
+    document.getElementById('status-dot').className = 'status-dot paused';
+    document.getElementById('status-name').textContent = '已暫停';
+  } else if (state === 'paused') {
+    state = 'recording';
+    startWatch();
+    timerH = setInterval(() => { elapsed++; document.getElementById('st-time').textContent = fmtTime(elapsed); }, 1000);
+    const b = document.getElementById('btn-pause');
+    b.textContent = '⏸'; b.className = 'btn btn-pause';
+    document.getElementById('status-dot').className = 'status-dot rec';
+    document.getElementById('status-name').textContent = session.name;
+  }
+}
+
+async function stopTracking() {
+  if (!confirm('停止記錄並保存此路線？')) return;
+  state = 'idle';
+  stopWatch(); clearInterval(timerH);
+  if (session && session.points.length > 0) {
+    session.duration = elapsed;
+    session.distance = calcDist(session.points);
+    session.pointCount = session.points.length;
+    session.waypointCount = session.waypoints.length;
+    await persistSession(session);
+  }
+  session = null; elapsed = 0;
+  updateUI(); refreshStats();
+}
+
+function startWatch() {
+  watchId = navigator.geolocation.watchPosition(updatePos,
+    e => { showGpsError(e.code); if (e.code === 1) { stopTracking(); } },
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+  );
+}
+function stopWatch() {
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+}
+
+/* ════════════════════════════════════════════════
+   UI
+════════════════════════════════════════════════ */
+function updateUI() {
+  document.getElementById('ctrl-idle').style.display = state === 'idle' ? 'flex' : 'none';
+  document.getElementById('ctrl-rec').style.display  = state !== 'idle' ? 'flex' : 'none';
+  const dot = document.getElementById('status-dot');
+  if (state === 'recording') { dot.className = 'status-dot rec'; document.getElementById('status-name').textContent = session?.name || '記錄中'; }
+  else if (state === 'idle') { dot.className = 'status-dot'; document.getElementById('status-name').textContent = '準備記錄'; }
+}
+
+function refreshStats() {
+  const pts = session?.points?.length || 0;
+  const dist = session ? calcDist(session.points) : 0;
+  document.getElementById('st-pts').textContent = pts;
+  document.getElementById('st-dist').textContent = fmtDist(dist);
+}
+
+/* ════════════════════════════════════════════════
+   WAYPOINT MODAL
+════════════════════════════════════════════════ */
+function openModal() {
+  if (state !== 'recording') return;
+  document.getElementById('wp-note').value = '';
+  document.getElementById('photo-preview').style.display = 'none';
+  document.getElementById('photo-input').value = '';
+  pendingPhoto = null;
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('open');
+}
+
+function handlePhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 900;
+      let w = img.width, h = img.height;
+      if (w > h && w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      else if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      pendingPhoto = canvas.toDataURL('image/jpeg', .7);
+      const prev = document.getElementById('photo-preview');
+      prev.src = pendingPhoto; prev.style.display = 'block';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveWaypoint() {
+  if (!session?.points?.length) { alert('尚未取得 GPS 位置'); return; }
+  const last = session.points[session.points.length - 1];
+  const wp = {
+    id: uid(),
+    lat: last.lat, lng: last.lng,
+    ts: Date.now(),
+    note: document.getElementById('wp-note').value.trim(),
+    photo: pendingPhoto,
+  };
+  session.waypoints.push(wp);
+  placeWpMarker(wp, map);
+  closeModal();
+}
+
+function placeWpMarker(wp, targetMap) {
+  const icon = L.divIcon({
+    html: `<div style="background:#e8b86d;border:2.5px solid #fff;border-radius:50%;width:14px;height:14px;box-shadow:0 1px 5px rgba(0,0,0,.5)"></div>`,
+    className: '', iconSize: [14, 14], iconAnchor: [7, 7],
+  });
+  const m = L.marker([wp.lat, wp.lng], { icon }).addTo(targetMap);
+  if (wp.note || wp.photo) {
+    m.bindPopup(`
+      ${wp.photo ? `<img src="${wp.photo}" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block">` : ''}
+      ${wp.note ? `<div style="font-size:13px;line-height:1.5">${wp.note}</div>` : ''}
+      <div style="font-size:11px;color:#888;margin-top:4px">${new Date(wp.ts).toLocaleTimeString('zh-HK')}</div>
+    `, { maxWidth: 240 });
+  }
+}
+
+/* ════════════════════════════════════════════════
+   VIEWS
+════════════════════════════════════════════════ */
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if (id === 'view-map') setTimeout(() => map.invalidateSize(), 80);
+}
+
+function showMap() { showView('view-map'); }
+
+async function showHistory() {
+  await loadMeta();
+  renderHistory();
+  showView('view-history');
+}
+
+function renderHistory() {
+  const c = document.getElementById('session-list');
+  if (!sessions.length) {
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">🗺️</div><div>尚未有路線記錄</div></div>`;
+    return;
+  }
+  c.innerHTML = sessions.map(s => `
+    <div class="session-card" onclick="showDetail('${s.id}')">
+      <div class="sc-name">${s.name}</div>
+      <div class="sc-meta">
+        <span>📅 ${new Date(s.date).toLocaleDateString('zh-HK')}</span>
+        <span>⏱ ${fmtTime(s.duration||0)}</span>
+        <span>📏 ${fmtDist(s.distance||0)}</span>
+        <span>📍 ${s.waypointCount||0} 記錄點</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function showDetail(id) {
+  viewingId = id;
+  const data = await loadSession(id);
+  if (!data) { alert('無法載入路線'); return; }
+
+  document.getElementById('detail-title').textContent = data.name;
+  showView('view-detail');
+
+  // Waypoints list
+  const wl = document.getElementById('wp-list');
+  if (!data.waypoints.length) {
+    wl.innerHTML = `<div style="color:rgba(255,255,255,.25);text-align:center;padding:20px;font-size:13px">未有加入記錄點</div>`;
+  } else {
+    wl.innerHTML = data.waypoints.map((wp,i) => `
+      <div class="wp-item">
+        ${wp.photo ? `<img src="${wp.photo}">` : ''}
+        <div class="wp-note">${wp.note || `記錄點 ${i+1}`}</div>
+        <div class="wp-time">${new Date(wp.ts).toLocaleString('zh-HK')}</div>
+      </div>
+    `).join('');
+  }
+
+  // Detail map
+  setTimeout(() => {
+    if (detailMap) { detailMap.remove(); detailMap = null; }
+    detailMap = L.map('detail-map', { zoomControl: false, attributionControl: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains:'abcd' }).addTo(detailMap);
+
+    if (data.points.length) {
+      const lls = data.points.map(p => [p.lat, p.lng]);
+      const pl = L.polyline(lls, { color: '#3b82f6', weight: 4 }).addTo(detailMap);
+
+      // Start / end
+      const si = L.divIcon({ html: `<div style="background:#22c55e;border:2px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
+      const ei = L.divIcon({ html: `<div style="background:#ef4444;border:2px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
+      L.marker(lls[0], { icon: si }).addTo(detailMap).bindPopup('起點');
+      if (lls.length > 1) L.marker(lls[lls.length-1], { icon: ei }).addTo(detailMap).bindPopup('終點');
+
+      data.waypoints.forEach(wp => placeWpMarker(wp, detailMap));
+      detailMap.fitBounds(pl.getBounds().pad(.12));
+    } else {
+      detailMap.setView([22.3193, 114.1694], 14);
+    }
+  }, 80);
+}
+
+async function deleteSession() {
+  if (!viewingId || !confirm('確定刪除此路線記錄？')) return;
+  sessions = sessions.filter(s => s.id !== viewingId);
+  await window.storage.set(SESSIONS_META, JSON.stringify(sessions));
+  try { await window.storage.delete(SESSION_PFX + viewingId); } catch {}
+  viewingId = null;
+  showHistory();
+}
+
+/* ════════════════════════════════════════════════
+   STORAGE
+════════════════════════════════════════════════ */
+async function loadMeta() {
+  try {
+    const r = await window.storage.get(SESSIONS_META);
+    sessions = r ? JSON.parse(r.value) : [];
+    sessions.sort((a, b) => new Date(b.date) - new Date(a.date));
+  } catch { sessions = []; }
+}
+
+async function loadSession(id) {
+  try {
+    const r = await window.storage.get(SESSION_PFX + id);
+    return r ? JSON.parse(r.value) : null;
+  } catch { return null; }
+}
+
+async function persistSession(s) {
+  const meta = { id:s.id, name:s.name, date:s.date, duration:s.duration, distance:s.distance, pointCount:s.pointCount, waypointCount:s.waypointCount };
+  sessions = [meta, ...sessions.filter(x => x.id !== s.id)];
+  await window.storage.set(SESSIONS_META, JSON.stringify(sessions));
+  await window.storage.set(SESSION_PFX + s.id, JSON.stringify(s));
+}
+
+/* ════════════════════════════════════════════════
+   HELPERS
+════════════════════════════════════════════════ */
+function calcDist(pts) {
+  let d = 0;
+  for (let i = 1; i < pts.length; i++) d += hav(pts[i-1].lat, pts[i-1].lng, pts[i].lat, pts[i].lng);
+  return d;
+}
+function hav(lat1,lng1,lat2,lng2) {
+  const R=6371000, dL=(lat2-lat1)*Math.PI/180, dG=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dL/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dG/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function fmtDist(m) { return m<1000 ? `${Math.round(m)}m` : `${(m/1000).toFixed(2)}km`; }
+function fmtTime(s) {
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+  if(h>0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+// Close modal on backdrop click
+document.getElementById('modal-bg').addEventListener('click', e => { if(e.target===e.currentTarget) closeModal(); });
+</script>
+</body>
+</html>
