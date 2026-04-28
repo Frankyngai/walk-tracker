@@ -136,6 +136,25 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
 
 /* Danger btn */
 .btn-danger{color:#ef4444;border-color:#ef4444;}
+
+/* ── Lightbox ── */
+#lightbox{
+  position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:1000;
+  display:none;align-items:center;justify-content:center;
+  padding:20px;
+}
+#lightbox.open{display:flex;}
+#lightbox img{
+  max-width:100%;max-height:90vh;
+  object-fit:contain;border-radius:10px;
+}
+#lightbox-close{
+  position:absolute;top:16px;right:16px;
+  width:38px;height:38px;border-radius:50%;
+  background:rgba(255,255,255,.15);border:none;
+  color:#fff;font-size:20px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
 </style>
 </head>
 <body>
@@ -208,6 +227,8 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
     <button class="btn btn-ghost btn-danger" onclick="deleteSession()">🗑</button>
   </div>
   <div id="detail-map"></div>
+  <div id="detail-stats" style="display:flex;gap:0;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;"></div>
+  <div id="detail-error" style="display:none;color:#fca5a5;font-size:13px;padding:14px 16px;background:rgba(239,68,68,.1);"></div>
   <div id="wp-list" class="scroll-area"></div>
 </div>
 
@@ -219,8 +240,8 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
     <button class="photo-btn" onclick="document.getElementById('photo-input').click()">
       📷 拍照 / 選擇相片
     </button>
-    <input type="file" id="photo-input" accept="image/*" capture="environment" onchange="handlePhoto(this)" style="display:none">
-    <img id="photo-preview">
+    <input type="file" id="photo-input" accept="image/*" onchange="handlePhoto(this)" style="display:none">
+    <img id="photo-preview" onclick="openLightbox(this.src)" style="cursor:zoom-in">
     <div class="field-label">備註</div>
     <textarea id="wp-note" class="field-textarea" rows="3" placeholder="輸入備註、觀察、感想…"></textarea>
     <div class="modal-actions">
@@ -483,7 +504,7 @@ function placeWpMarker(wp, targetMap) {
   const m = L.marker([wp.lat, wp.lng], { icon }).addTo(targetMap);
   if (wp.note || wp.photo) {
     m.bindPopup(`
-      ${wp.photo ? `<img src="${wp.photo}" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block">` : ''}
+      ${wp.photo ? `<img src="${wp.photo}" onclick="openLightbox(this.src)" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block;cursor:zoom-in">` : ''}
       ${wp.note ? `<div style="font-size:13px;line-height:1.5">${wp.note}</div>` : ''}
       <div style="font-size:11px;color:#888;margin-top:4px">${new Date(wp.ts).toLocaleTimeString('zh-HK')}</div>
     `, { maxWidth: 240 });
@@ -528,48 +549,79 @@ function renderHistory() {
 
 function showDetail(id) {
   viewingId = id;
-  const data = loadSession(id);
-  if (!data) { alert('無法載入路線'); return; }
 
-  document.getElementById('detail-title').textContent = data.name;
+  // Switch view first so user sees something immediately
   showView('view-detail');
 
+  const errEl = document.getElementById('detail-error');
+  const wl    = document.getElementById('wp-list');
+  errEl.style.display = 'none';
+
+  let data;
+  try { data = loadSession(id); } catch(e) { data = null; }
+
+  if (!data) {
+    // Session meta exists but full data missing (e.g. recorded before localStorage fix)
+    document.getElementById('detail-title').textContent = '路線詳情';
+    errEl.textContent = '⚠️ 此路線資料不完整（可能係舊版本記錄，未能讀取）';
+    errEl.style.display = 'block';
+    wl.innerHTML = '';
+    document.getElementById('detail-stats').innerHTML = '';
+    return;
+  }
+
+  document.getElementById('detail-title').textContent = data.name;
+
+  // Stats bar
+  const ds = document.getElementById('detail-stats');
+  const stats = [
+    { label:'日期', val: new Date(data.date).toLocaleDateString('zh-HK') },
+    { label:'時間', val: fmtTime(data.duration||0) },
+    { label:'距離', val: fmtDist(data.distance||0) },
+    { label:'記錄點', val: (data.waypoints||[]).length },
+  ];
+  ds.innerHTML = stats.map(s => `
+    <div style="flex:1;text-align:center;padding:10px 4px;border-right:1px solid rgba(255,255,255,.07)">
+      <div style="font-size:13px;font-weight:700;color:#e8b86d">${s.val}</div>
+      <div style="font-size:10px;color:rgba(255,255,255,.35);margin-top:2px">${s.label}</div>
+    </div>`).join('');
+
   // Waypoints list
-  const wl = document.getElementById('wp-list');
-  if (!data.waypoints.length) {
+  const wps = data.waypoints || [];
+  if (!wps.length) {
     wl.innerHTML = `<div style="color:rgba(255,255,255,.25);text-align:center;padding:20px;font-size:13px">未有加入記錄點</div>`;
   } else {
-    wl.innerHTML = data.waypoints.map((wp,i) => `
+    wl.innerHTML = wps.map((wp,i) => `
       <div class="wp-item">
-        ${wp.photo ? `<img src="${wp.photo}">` : ''}
-        <div class="wp-note">${wp.note || `記錄點 ${i+1}`}</div>
+        ${wp.photo ? `<img src="${wp.photo}" onclick="openLightbox(this.src)" style="cursor:zoom-in">` : ''}
+        <div class="wp-note">${wp.note || '記錄點 '+(i+1)}</div>
         <div class="wp-time">${new Date(wp.ts).toLocaleString('zh-HK')}</div>
-      </div>
-    `).join('');
+      </div>`).join('');
   }
 
   // Detail map
   setTimeout(() => {
-    if (detailMap) { detailMap.remove(); detailMap = null; }
-    detailMap = L.map('detail-map', { zoomControl: false, attributionControl: false });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains:'abcd' }).addTo(detailMap);
-
-    if (data.points.length) {
-      const lls = data.points.map(p => [p.lat, p.lng]);
-      const pl = L.polyline(lls, { color: '#3b82f6', weight: 4 }).addTo(detailMap);
-
-      // Start / end
-      const si = L.divIcon({ html: `<div style="background:#22c55e;border:2px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
-      const ei = L.divIcon({ html: `<div style="background:#ef4444;border:2px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
-      L.marker(lls[0], { icon: si }).addTo(detailMap).bindPopup('起點');
-      if (lls.length > 1) L.marker(lls[lls.length-1], { icon: ei }).addTo(detailMap).bindPopup('終點');
-
-      data.waypoints.forEach(wp => placeWpMarker(wp, detailMap));
-      detailMap.fitBounds(pl.getBounds().pad(.12));
-    } else {
-      detailMap.setView([22.3193, 114.1694], 14);
+    try {
+      if (detailMap) { detailMap.remove(); detailMap = null; }
+      detailMap = L.map('detail-map', { zoomControl: false, attributionControl: false });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains:'abcd' }).addTo(detailMap);
+      const pts = data.points || [];
+      if (pts.length) {
+        const lls = pts.map(p => [p.lat, p.lng]);
+        const pl = L.polyline(lls, { color: '#3b82f6', weight: 4 }).addTo(detailMap);
+        const si = L.divIcon({ html: `<div style="background:#22c55e;border:2px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
+        const ei = L.divIcon({ html: `<div style="background:#ef4444;border:2px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
+        L.marker(lls[0], { icon: si }).addTo(detailMap).bindPopup('起點');
+        if (lls.length > 1) L.marker(lls[lls.length-1], { icon: ei }).addTo(detailMap).bindPopup('終點');
+        wps.forEach(wp => placeWpMarker(wp, detailMap));
+        detailMap.fitBounds(pl.getBounds().pad(.12));
+      } else {
+        detailMap.setView([22.3193, 114.1694], 14);
+      }
+    } catch(e) {
+      document.getElementById('detail-map').innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.3);font-size:13px">地圖載入失敗</div>';
     }
-  }, 80);
+  }, 120);
 }
 
 function deleteSession() {
@@ -627,8 +679,24 @@ function fmtTime(s) {
 }
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
+
+function openLightbox(src) {
+  document.getElementById('lightbox-img').src = src;
+  document.getElementById('lightbox').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
 // Close modal on backdrop click
 document.getElementById('modal-bg').addEventListener('click', e => { if(e.target===e.currentTarget) closeModal(); });
 </script>
+
+<div id="lightbox" onclick="closeLightbox()">
+  <button id="lightbox-close" onclick="closeLightbox()">✕</button>
+  <img id="lightbox-img" src="" alt="">
+</div>
 </body>
 </html>
