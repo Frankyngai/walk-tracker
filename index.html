@@ -175,8 +175,16 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
     <!-- RECORDING -->
     <div id="ctrl-rec" class="ctrl-row" style="display:none">
       <button id="btn-pause" class="btn btn-pause" onclick="togglePause()">⏸</button>
-      <button class="btn btn-stop" onclick="stopTracking()">⏹</button>
+      <button class="btn btn-stop" onclick="showStopConfirm()">⏹</button>
       <button class="btn btn-wp" onclick="openModal()">📍 加入記錄點</button>
+    </div>
+    <!-- STOP CONFIRM -->
+    <div id="ctrl-stop-confirm" class="ctrl-row" style="display:none;flex-direction:column;gap:8px">
+      <div style="text-align:center;font-size:13px;color:rgba(255,255,255,.6);padding-bottom:2px">停止並保存此路線？</div>
+      <div style="display:flex;gap:10px;width:100%">
+        <button class="btn btn-ghost" style="flex:1" onclick="hideStopConfirm()">繼續記錄</button>
+        <button class="btn btn-stop" style="flex:1" onclick="stopTracking()">確認停止</button>
+      </div>
     </div>
   </div>
 </div>
@@ -351,24 +359,36 @@ function togglePause() {
   }
 }
 
+function showStopConfirm() {
+  document.getElementById('ctrl-rec').style.display = 'none';
+  document.getElementById('ctrl-stop-confirm').style.display = 'flex';
+}
+function hideStopConfirm() {
+  document.getElementById('ctrl-stop-confirm').style.display = 'none';
+  document.getElementById('ctrl-rec').style.display = 'flex';
+}
 async function stopTracking() {
-  if (!confirm('停止記錄並保存此路線？')) return;
   state = 'idle';
-  stopWatch(); clearInterval(timerH);
-  if (session && session.points.length > 0) {
-    session.duration = elapsed;
-    session.distance = calcDist(session.points);
-    session.pointCount = session.points.length;
-    session.waypointCount = session.waypoints.length;
-    await persistSession(session);
-  }
+  stopWatch();
+  clearInterval(timerH);
+  timerH = null;
+  try {
+    if (session && session.points.length > 0) {
+      session.duration = elapsed;
+      session.distance = calcDist(session.points);
+      session.pointCount = session.points.length;
+      session.waypointCount = session.waypoints.length;
+      await persistSession(session);
+    }
+  } catch(e) { console.warn('Save failed', e); }
   session = null; elapsed = 0;
+  document.getElementById('ctrl-stop-confirm').style.display = 'none';
   updateUI(); refreshStats();
 }
 
 function startWatch() {
   watchId = navigator.geolocation.watchPosition(updatePos,
-    e => { showGpsError(e.code); if (e.code === 1) { stopTracking(); } },
+    e => { showGpsError(e.code); },
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
   );
 }
