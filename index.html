@@ -248,12 +248,19 @@ let sessions = [];
 const SESSIONS_META = 'wt-sessions-v1';
 const SESSION_PFX   = 'wt-sess-';
 
+// localStorage helpers (works on GitHub Pages / real browsers)
+const store = {
+  get: (key) => { try { const v = localStorage.getItem(key); return v ? { value: v } : null; } catch { return null; } },
+  set: (key, val) => { try { localStorage.setItem(key, val); } catch(e) { console.warn('Storage full?', e); } },
+  del: (key) => { try { localStorage.removeItem(key); } catch {} }
+};
+
 /* ════════════════════════════════════════════════
    INIT
 ════════════════════════════════════════════════ */
 window.addEventListener('load', async () => {
   initMap();
-  await loadMeta();
+  loadMeta();
   getInitialPosition();
 });
 
@@ -367,7 +374,7 @@ function hideStopConfirm() {
   document.getElementById('ctrl-stop-confirm').style.display = 'none';
   document.getElementById('ctrl-rec').style.display = 'flex';
 }
-async function stopTracking() {
+function stopTracking() {
   state = 'idle';
   stopWatch();
   clearInterval(timerH);
@@ -378,7 +385,7 @@ async function stopTracking() {
       session.distance = calcDist(session.points);
       session.pointCount = session.points.length;
       session.waypointCount = session.waypoints.length;
-      await persistSession(session);
+      persistSession(session);
     }
   } catch(e) { console.warn('Save failed', e); }
   session = null; elapsed = 0;
@@ -495,7 +502,7 @@ function showView(id) {
 function showMap() { showView('view-map'); }
 
 async function showHistory() {
-  await loadMeta();
+  loadMeta();
   renderHistory();
   showView('view-history');
 }
@@ -521,7 +528,7 @@ function renderHistory() {
 
 async function showDetail(id) {
   viewingId = id;
-  const data = await loadSession(id);
+  const data = loadSession(id);
   if (!data) { alert('無法載入路線'); return; }
 
   document.getElementById('detail-title').textContent = data.name;
@@ -568,8 +575,8 @@ async function showDetail(id) {
 async function deleteSession() {
   if (!viewingId || !confirm('確定刪除此路線記錄？')) return;
   sessions = sessions.filter(s => s.id !== viewingId);
-  await window.storage.set(SESSIONS_META, JSON.stringify(sessions));
-  try { await window.storage.delete(SESSION_PFX + viewingId); } catch {}
+  store.set(SESSIONS_META, JSON.stringify(sessions));
+  store.del(SESSION_PFX + viewingId);
   viewingId = null;
   showHistory();
 }
@@ -579,7 +586,7 @@ async function deleteSession() {
 ════════════════════════════════════════════════ */
 async function loadMeta() {
   try {
-    const r = await window.storage.get(SESSIONS_META);
+    const r = store.get(SESSIONS_META);
     sessions = r ? JSON.parse(r.value) : [];
     sessions.sort((a, b) => new Date(b.date) - new Date(a.date));
   } catch { sessions = []; }
@@ -587,7 +594,7 @@ async function loadMeta() {
 
 async function loadSession(id) {
   try {
-    const r = await window.storage.get(SESSION_PFX + id);
+    const r = store.get(SESSION_PFX + id);
     return r ? JSON.parse(r.value) : null;
   } catch { return null; }
 }
@@ -595,8 +602,8 @@ async function loadSession(id) {
 async function persistSession(s) {
   const meta = { id:s.id, name:s.name, date:s.date, duration:s.duration, distance:s.distance, pointCount:s.pointCount, waypointCount:s.waypointCount };
   sessions = [meta, ...sessions.filter(x => x.id !== s.id)];
-  await window.storage.set(SESSIONS_META, JSON.stringify(sessions));
-  await window.storage.set(SESSION_PFX + s.id, JSON.stringify(s));
+  store.set(SESSIONS_META, JSON.stringify(sessions));
+  store.set(SESSION_PFX + s.id, JSON.stringify(s));
 }
 
 /* ════════════════════════════════════════════════
