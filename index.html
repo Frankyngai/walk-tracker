@@ -88,13 +88,63 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
 /* ── Detail ── */
 #view-detail{background:#0d0d14;}
 #detail-map{height:260px;flex-shrink:0;}
+/* ── Waypoint Cards ── */
+.wp-list-inner{padding:16px 16px 40px;}
 .wp-item{
-  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
-  border-radius:12px;padding:12px;margin-bottom:10px;
+  position:relative;
+  margin-bottom:0;
+  display:flex;
+  gap:0;
 }
-.wp-item img{width:100%;max-height:220px;object-fit:cover;border-radius:8px;margin-bottom:8px;display:block;}
-.wp-note{font-size:14px;line-height:1.55;}
-.wp-time{font-size:11px;color:rgba(255,255,255,.35);margin-top:6px;}
+/* timeline line */
+.wp-item:not(:last-child) .wp-line{
+  position:absolute;left:17px;top:36px;bottom:-8px;
+  width:2px;background:rgba(255,255,255,.08);z-index:0;
+}
+.wp-dot-col{
+  display:flex;flex-direction:column;align-items:center;
+  flex-shrink:0;width:36px;padding-top:6px;
+}
+.wp-dot{
+  width:14px;height:14px;border-radius:50%;
+  background:#e8b86d;border:2.5px solid #1a1428;
+  box-shadow:0 0 0 3px rgba(232,184,109,.25);
+  flex-shrink:0;z-index:1;
+}
+.wp-line{width:2px;flex:1;background:rgba(255,255,255,.08);margin-top:4px;}
+.wp-body{
+  flex:1;min-width:0;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;
+  margin-bottom:16px;
+  overflow:hidden;
+}
+.wp-body-inner{padding:12px 14px;}
+.wp-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.wp-index{
+  font-size:11px;font-weight:700;letter-spacing:.06em;
+  color:#e8b86d;text-transform:uppercase;
+}
+.wp-time{font-size:11px;color:rgba(255,255,255,.3);}
+.wp-photo{
+  width:100%;aspect-ratio:16/9;object-fit:cover;
+  display:block;cursor:zoom-in;
+  transition:opacity .15s;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  margin-bottom:0;
+}
+.wp-photo:active{opacity:.85;}
+.wp-note{
+  font-size:14px;line-height:1.6;
+  color:rgba(255,255,255,.85);
+  padding:12px 14px;
+}
+.wp-no-note{
+  font-size:13px;color:rgba(255,255,255,.25);
+  font-style:italic;padding:12px 14px;
+}
+.wp-photo-only .wp-note{ display:none; }
 
 /* ── Modal ── */
 .modal-bg{
@@ -229,7 +279,7 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
   <div id="detail-map"></div>
   <div id="detail-stats" style="display:flex;gap:0;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;"></div>
   <div id="detail-error" style="display:none;color:#fca5a5;font-size:13px;padding:14px 16px;background:rgba(239,68,68,.1);"></div>
-  <div id="wp-list" class="scroll-area"></div>
+  <div id="wp-list" style="flex:1;overflow-y:auto;"></div>
 </div>
 
 <!-- ═══════════════════ WAYPOINT MODAL ═══════════════════ -->
@@ -589,14 +639,33 @@ function showDetail(id) {
   // Waypoints list
   const wps = data.waypoints || [];
   if (!wps.length) {
-    wl.innerHTML = `<div style="color:rgba(255,255,255,.25);text-align:center;padding:20px;font-size:13px">未有加入記錄點</div>`;
+    wl.innerHTML = `<div style="color:rgba(255,255,255,.2);text-align:center;padding:40px 20px;font-size:13px;">
+      <div style="font-size:36px;margin-bottom:10px">📍</div>未有加入記錄點</div>`;
   } else {
-    wl.innerHTML = wps.map((wp,i) => `
+    wl.innerHTML = `<div class="wp-list-inner">` + wps.map((wp,i) => {
+      const time = new Date(wp.ts).toLocaleTimeString('zh-HK',{hour:'2-digit',minute:'2-digit'});
+      const isLast = i === wps.length - 1;
+      return `
       <div class="wp-item">
-        ${wp.photo ? `<img src="${wp.photo}" onclick="openLightbox(this.src)" style="cursor:zoom-in">` : ''}
-        <div class="wp-note">${wp.note || '記錄點 '+(i+1)}</div>
-        <div class="wp-time">${new Date(wp.ts).toLocaleString('zh-HK')}</div>
-      </div>`).join('');
+        <div class="wp-dot-col">
+          <div class="wp-dot"></div>
+          ${!isLast ? '<div class="wp-line"></div>' : ''}
+        </div>
+        <div class="wp-body">
+          ${wp.photo ? `<img class="wp-photo" src="${wp.photo}" onclick="openLightbox(this.src)">` : ''}
+          <div class="wp-body-inner">
+            <div class="wp-header">
+              <span class="wp-index">記錄點 ${i+1}</span>
+              <span class="wp-time">🕐 ${time}</span>
+            </div>
+            ${wp.note
+              ? `<div class="wp-note">${wp.note}</div>`
+              : `<div class="wp-no-note">未有備註</div>`
+            }
+          </div>
+        </div>
+      </div>`;
+    }).join('') + `</div>`;
   }
 
   // Detail map
