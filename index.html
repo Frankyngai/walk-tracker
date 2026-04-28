@@ -258,7 +258,7 @@ const store = {
 /* ════════════════════════════════════════════════
    INIT
 ════════════════════════════════════════════════ */
-window.addEventListener('load', async () => {
+window.addEventListener('load', () => {
   initMap();
   loadMeta();
   getInitialPosition();
@@ -501,7 +501,7 @@ function showView(id) {
 
 function showMap() { showView('view-map'); }
 
-async function showHistory() {
+function showHistory() {
   loadMeta();
   renderHistory();
   showView('view-history');
@@ -526,7 +526,7 @@ function renderHistory() {
   `).join('');
 }
 
-async function showDetail(id) {
+function showDetail(id) {
   viewingId = id;
   const data = loadSession(id);
   if (!data) { alert('無法載入路線'); return; }
@@ -572,7 +572,7 @@ async function showDetail(id) {
   }, 80);
 }
 
-async function deleteSession() {
+function deleteSession() {
   if (!viewingId || !confirm('確定刪除此路線記錄？')) return;
   sessions = sessions.filter(s => s.id !== viewingId);
   store.set(SESSIONS_META, JSON.stringify(sessions));
@@ -584,7 +584,7 @@ async function deleteSession() {
 /* ════════════════════════════════════════════════
    STORAGE
 ════════════════════════════════════════════════ */
-async function loadMeta() {
+function loadMeta() {
   try {
     const r = store.get(SESSIONS_META);
     sessions = r ? JSON.parse(r.value) : [];
@@ -592,14 +592,14 @@ async function loadMeta() {
   } catch { sessions = []; }
 }
 
-async function loadSession(id) {
+function loadSession(id) {
   try {
     const r = store.get(SESSION_PFX + id);
     return r ? JSON.parse(r.value) : null;
   } catch { return null; }
 }
 
-async function persistSession(s) {
+function persistSession(s) {
   const meta = { id:s.id, name:s.name, date:s.date, duration:s.duration, distance:s.distance, pointCount:s.pointCount, waypointCount:s.waypointCount };
   sessions = [meta, ...sessions.filter(x => x.id !== s.id)];
   store.set(SESSIONS_META, JSON.stringify(sessions));
