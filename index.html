@@ -205,6 +205,29 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
   color:#fff;font-size:20px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
 }
+
+/* overlay banner */
+#overlay-banner{
+  position:absolute;bottom:130px;left:12px;right:12px;z-index:500;
+  background:rgba(232,184,109,.15);border:1px solid rgba(232,184,109,.45);
+  border-radius:12px;padding:10px 14px;
+  display:none;align-items:center;gap:10px;
+  backdrop-filter:blur(8px);
+}
+#overlay-banner span{flex:1;font-size:12px;color:#e8b86d;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.btn-clear-overlay{
+  background:rgba(232,184,109,.2);border:1px solid rgba(232,184,109,.4);
+  color:#e8b86d;border-radius:8px;padding:6px 12px;font-size:12px;
+  cursor:pointer;font-family:inherit;white-space:nowrap;
+}
+/* show-on-map btn in history card */
+.btn-show-map{
+  background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.35);
+  color:#93c5fd;border-radius:8px;padding:6px 12px;font-size:12px;
+  cursor:pointer;font-family:inherit;white-space:nowrap;margin-top:10px;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.btn-show-map:active{background:rgba(59,130,246,.3);}
 </style>
 </head>
 <body>
@@ -233,6 +256,11 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
   <div class="gps-badge">
     <div id="gps-dot" class="gpsd"></div>
     <span id="gps-txt">等待 GPS</span>
+  </div>
+
+  <div id="overlay-banner">
+    <span id="overlay-name"></span>
+    <button class="btn-clear-overlay" onclick="clearOverlay()">✕ 清除</button>
   </div>
 
   <div class="bottom-bar">
@@ -306,6 +334,8 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
    STATE
 ════════════════════════════════════════════════ */
 let map, routeLine, posMarker, accCircle;
+let overlayLayers = [];  // historical route shown on main map
+let overlaySessionId = null;
 let detailMap;
 let watchId = null;
 let state = 'idle';          // idle | recording | paused
@@ -561,6 +591,65 @@ function placeWpMarker(wp, targetMap) {
   }
 }
 
+
+/* ════════════════════════════════════════════════
+   OVERLAY — show historical route on main map
+════════════════════════════════════════════════ */
+function showRouteOnMap(id, name) {
+  clearOverlay();
+  const data = loadSession(id);
+  if (!data || !data.points || !data.points.length) {
+    showView('view-map');
+    return;
+  }
+  overlaySessionId = id;
+
+  // Draw polyline in amber
+  const lls = data.points.map(p => [p.lat, p.lng]);
+  const pl = L.polyline(lls, { color:'#e8b86d', weight:4, opacity:.85, dashArray:'8,4' }).addTo(map);
+  overlayLayers.push(pl);
+
+  // Start marker (green)
+  const si = L.divIcon({ html:`<div style="background:#22c55e;border:2.5px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 5px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
+  const sm = L.marker(lls[0], { icon:si }).addTo(map).bindPopup('起點：'+name);
+  overlayLayers.push(sm);
+
+  // End marker (red)
+  if (lls.length > 1) {
+    const ei = L.divIcon({ html:`<div style="background:#ef4444;border:2.5px solid #fff;border-radius:50%;width:13px;height:13px;box-shadow:0 1px 5px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[13,13], iconAnchor:[6,6] });
+    const em = L.marker(lls[lls.length-1], { icon:ei }).addTo(map).bindPopup('終點：'+name);
+    overlayLayers.push(em);
+  }
+
+  // Waypoint markers
+  (data.waypoints||[]).forEach(wp => {
+    const icon = L.divIcon({ html:`<div style="background:#e8b86d;border:2.5px solid #fff;border-radius:50%;width:12px;height:12px;box-shadow:0 1px 5px rgba(0,0,0,.5)"></div>`, className:'', iconSize:[12,12], iconAnchor:[6,6] });
+    const m = L.marker([wp.lat,wp.lng],{icon}).addTo(map);
+    if (wp.note||wp.photo) m.bindPopup(`
+      ${wp.photo?`<img src="${wp.photo}" onclick="openLightbox(this.src)" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block;cursor:zoom-in">`:''}
+      ${wp.note?`<div style="font-size:13px;line-height:1.5">${wp.note}</div>`:''}
+      <div style="font-size:11px;color:#888;margin-top:4px">${new Date(wp.ts).toLocaleTimeString('zh-HK')}</div>
+    `,{maxWidth:240});
+    overlayLayers.push(m);
+  });
+
+  // Fit bounds
+  map.fitBounds(pl.getBounds().pad(.15));
+
+  // Show banner
+  document.getElementById('overlay-name').textContent = '📍 ' + name;
+  document.getElementById('overlay-banner').style.display = 'flex';
+
+  showView('view-map');
+}
+
+function clearOverlay() {
+  overlayLayers.forEach(l => map.removeLayer(l));
+  overlayLayers = [];
+  overlaySessionId = null;
+  document.getElementById('overlay-banner').style.display = 'none';
+}
+
 /* ════════════════════════════════════════════════
    VIEWS
 ════════════════════════════════════════════════ */
@@ -592,6 +681,11 @@ function renderHistory() {
         <span>⏱ ${fmtTime(s.duration||0)}</span>
         <span>📏 ${fmtDist(s.distance||0)}</span>
         <span>📍 ${s.waypointCount||0} 記錄點</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn-show-map" onclick="event.stopPropagation();showRouteOnMap('${s.id}','${s.name.replace(/'/g,"\'")}')">
+          🗺 在地圖顯示
+        </button>
       </div>
     </div>
   `).join('');
