@@ -228,6 +228,22 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
   display:inline-flex;align-items:center;gap:5px;
 }
 .btn-show-map:active{background:rgba(59,130,246,.3);}
+
+#recover-banner{
+  position:fixed;inset:0;z-index:800;
+  background:rgba(0,0,0,.75);backdrop-filter:blur(8px);
+  display:none;align-items:center;justify-content:center;padding:24px;
+}
+#recover-banner.open{display:flex;}
+.recover-card{
+  background:#1c1c28;border:1px solid rgba(255,255,255,.12);
+  border-radius:20px;padding:24px;max-width:340px;width:100%;text-align:center;
+}
+.recover-card h3{font-size:17px;font-weight:700;margin-bottom:8px;}
+.recover-card p{font-size:13px;color:rgba(255,255,255,.5);line-height:1.6;margin-bottom:20px;}
+.recover-actions{display:flex;flex-direction:column;gap:10px;}
+.btn-recover{padding:14px;border-radius:12px;background:#e8b86d;color:#1a0e00;border:none;cursor:pointer;font-family:inherit;font-size:15px;font-weight:700;}
+.btn-discard{padding:12px;border-radius:12px;background:rgba(255,255,255,.07);color:rgba(255,255,255,.6);border:none;cursor:pointer;font-family:inherit;font-size:14px;}
 </style>
 </head>
 <body>
@@ -334,8 +350,10 @@ html,body{height:100%;overflow:hidden;font-family:'PingFang TC',system-ui,sans-s
    STATE
 ════════════════════════════════════════════════ */
 let map, routeLine, posMarker, accCircle;
-let overlayLayers = [];  // historical route shown on main map
+let overlayLayers = [];
 let overlaySessionId = null;
+let autoSaveH = null;
+const LIVE_KEY = 'wt-live-session';
 let detailMap;
 let watchId = null;
 let state = 'idle';          // idle | recording | paused
@@ -363,6 +381,7 @@ window.addEventListener('load', () => {
   initMap();
   loadMeta();
   getInitialPosition();
+  checkRecovery();
 });
 
 function initMap() {
@@ -445,20 +464,21 @@ function startTracking() {
   state = 'recording';
   updateUI();
   startWatch();
+  startAutoSave();
   timerH = setInterval(() => { elapsed++; document.getElementById('st-time').textContent = fmtTime(elapsed); }, 1000);
 }
 
 function togglePause() {
   if (state === 'recording') {
     state = 'paused';
-    stopWatch(); clearInterval(timerH);
+    stopWatch(); clearInterval(timerH); stopAutoSave();
     const b = document.getElementById('btn-pause');
     b.textContent = '▶ 繼續'; b.className = 'btn btn-resume';
     document.getElementById('status-dot').className = 'status-dot paused';
     document.getElementById('status-name').textContent = '已暫停';
   } else if (state === 'paused') {
     state = 'recording';
-    startWatch();
+    startWatch(); startAutoSave();
     timerH = setInterval(() => { elapsed++; document.getElementById('st-time').textContent = fmtTime(elapsed); }, 1000);
     const b = document.getElementById('btn-pause');
     b.textContent = '⏸'; b.className = 'btn btn-pause';
@@ -489,6 +509,8 @@ function stopTracking() {
       persistSession(session);
     }
   } catch(e) { console.warn('Save failed', e); }
+  clearLiveSession();
+  stopAutoSave();
   session = null; elapsed = 0;
   document.getElementById('ctrl-stop-confirm').style.display = 'none';
   updateUI(); refreshStats();
@@ -591,6 +613,88 @@ function placeWpMarker(wp, targetMap) {
   }
 }
 
+
+
+/* ════════════════════════════════════════════════
+   AUTO-SAVE & RECOVERY
+════════════════════════════════════════════════ */
+function startAutoSave() {
+  stopAutoSave();
+  autoSaveH = setInterval(savelivesession, 4000);
+}
+function stopAutoSave() {
+  if (autoSaveH) { clearInterval(autoSaveH); autoSaveH = null; }
+}
+function savelivesession() {
+  if (!session) return;
+  try {
+    const snap = {
+      ...session,
+      _elapsed: elapsed,
+      _ts: Date.now(),
+      _state: state,
+    };
+    store.set(LIVE_KEY, JSON.stringify(snap));
+  } catch(e) {}
+}
+function clearLiveSession() {
+  store.del(LIVE_KEY);
+}
+function checkRecovery() {
+  try {
+    const r = store.get(LIVE_KEY);
+    if (!r) return;
+    const snap = JSON.parse(r.value);
+    // Only recover if it was active less than 2 hours ago
+    if (!snap || !snap.points || !snap.points.length) { clearLiveSession(); return; }
+    const age = Date.now() - snap._ts;
+    if (age > 2 * 60 * 60 * 1000) { clearLiveSession(); return; }
+
+    const mins = Math.round(age / 60000);
+    const ageStr = mins < 1 ? '不足 1 分鐘' : `約 ${mins} 分鐘`;
+    document.getElementById('recover-info').textContent =
+      `「${snap.name}」中斷前已記錄 ${snap.points.length} 個 GPS 點，距離中斷 ${ageStr}。是否繼續？`;
+    document.getElementById('recover-banner').classList.add('open');
+  } catch(e) { clearLiveSession(); }
+}
+function recoverSession() {
+  document.getElementById('recover-banner').classList.remove('open');
+  try {
+    const r = store.get(LIVE_KEY);
+    if (!r) return;
+    const snap = JSON.parse(r.value);
+    session = { id: snap.id, name: snap.name, date: snap.date, points: snap.points, waypoints: snap.waypoints || [] };
+    elapsed = snap._elapsed || 0;
+    state = 'recording';
+
+    // Redraw route
+    routeLine.setLatLngs(session.points.map(p => [p.lat, p.lng]));
+    // Redraw waypoint markers
+    session.waypoints.forEach(wp => placeWpMarker(wp, map));
+    // Fit map to route
+    if (session.points.length > 1) {
+      map.fitBounds(routeLine.getBounds().pad(.15));
+    }
+    updateUI();
+    refreshStats();
+    startWatch();
+    timerH = setInterval(() => { elapsed++; document.getElementById('st-time').textContent = fmtTime(elapsed); }, 1000);
+    startAutoSave();
+  } catch(e) { console.warn('Recovery failed', e); discardRecovery(); }
+}
+function discardRecovery() {
+  document.getElementById('recover-banner').classList.remove('open');
+  clearLiveSession();
+}
+
+// Page visibility: resume watch when coming back to foreground
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state === 'recording') {
+    // Restart GPS watch in case it was killed
+    stopWatch();
+    startWatch();
+  }
+});
 
 /* ════════════════════════════════════════════════
    OVERLAY — show historical route on main map
@@ -860,6 +964,17 @@ document.getElementById('modal-bg').addEventListener('click', e => { if(e.target
 <div id="lightbox" onclick="closeLightbox()">
   <button id="lightbox-close" onclick="closeLightbox()">✕</button>
   <img id="lightbox-img" src="" alt="">
+</div>
+<div id="recover-banner">
+  <div class="recover-card">
+    <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+    <h3>發現未完成的路線</h3>
+    <p id="recover-info">App 可能因背景運行而中斷，發現有未保存的記錄。</p>
+    <div class="recover-actions">
+      <button class="btn-recover" onclick="recoverSession()">繼續恢復記錄</button>
+      <button class="btn-discard" onclick="discardRecovery()">捨棄並重新開始</button>
+    </div>
+  </div>
 </div>
 </body>
 </html>
